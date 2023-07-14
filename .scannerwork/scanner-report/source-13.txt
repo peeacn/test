@@ -1,0 +1,99 @@
+package com.accenture.bars.file;
+
+import com.accenture.bars.controller.BarsController;
+import com.accenture.bars.domain.Request;
+import com.accenture.bars.exception.BarsException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.List;
+
+public class CSVInputFileImpl extends AbstractInputFile {
+
+    private static final int EXPECTED_CSV_COLUMNS = 3;
+    private static final int END_DATE_INDEX = 2;
+    private static final Logger log = LoggerFactory.getLogger(
+            BarsController.class);
+
+    @Override
+    public List<Request> readFile() throws IOException, BarsException {
+        List<Request> requests = new ArrayList<>();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM/dd/yyyy");
+
+        try (BufferedReader br = new BufferedReader(new FileReader(getFile()))){
+            String line;
+            int lineNumber = 0;
+            while ((line = br.readLine()) != null) {
+                lineNumber++;
+                String[] data = line.split(",");
+                if (data.length != EXPECTED_CSV_COLUMNS) {
+                    throw new BarsException("Invalid CSV format at row "
+                            + lineNumber, HttpStatus.BAD_REQUEST);
+                }
+
+                // extract billing cycle from first column
+                int billingCycle;
+                try {
+                    billingCycle = Integer.parseInt(data[0].trim());
+                } catch (NumberFormatException e) {
+                    throw new BarsException(BarsException.INVALID_BILLING_CYCLE
+                            + lineNumber, HttpStatus.BAD_REQUEST);
+                }
+                if (billingCycle < MIN_BILLING_CYCLE ||
+                        billingCycle > MAX_BILLING_CYCLE) {
+                    throw new BarsException(
+                            BarsException.BILLING_CYCLE_NOT_ON_RANGE
+                                    + lineNumber, HttpStatus.BAD_REQUEST);
+                }
+
+                // extract start date from second column
+                LocalDate startDate;
+                try {
+                    String startDateStr = data[1].trim();
+                    // Replace space with 0
+                    startDateStr =
+                            startDateStr.replaceAll("\\s", "0");
+
+                    startDate = LocalDate.parse(startDateStr.trim(), formatter);
+                } catch (DateTimeParseException e) {
+                    log.error(BarsException.INVALID_START_DATE_FORMAT
+                            + lineNumber, e);
+                    throw new BarsException(
+                            BarsException.INVALID_START_DATE_FORMAT
+                                    + lineNumber, HttpStatus.BAD_REQUEST);
+                }
+
+                // extract end date from third column
+                LocalDate endDate;
+                try {
+                    endDate = LocalDate.parse(data[END_DATE_INDEX].trim(),
+                            formatter);
+                } catch (DateTimeParseException e) {
+                    log.error(BarsException.INVALID_END_DATE_FORMAT
+                            + lineNumber, e);
+                    throw new BarsException(
+                            BarsException.INVALID_END_DATE_FORMAT
+                                    + lineNumber, HttpStatus.BAD_REQUEST);
+                }
+
+                // create Request object and add to list
+                Request request = new Request(billingCycle, startDate, endDate);
+                requests.add(request);
+            }
+        } catch (IOException e) {
+            log.error("Failed to read input file: " + e.getMessage(), e);
+            throw new IOException("Failed to read input file: "
+                    + e.getMessage());
+        }
+
+        return requests;
+    }
+}

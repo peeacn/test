@@ -1,0 +1,104 @@
+package com.accenture.bars.file;
+
+import com.accenture.bars.controller.BarsController;
+import com.accenture.bars.domain.Request;
+import com.accenture.bars.exception.BarsException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.List;
+
+
+public class TextInputFileImpl extends AbstractInputFile {
+    private static final int EXPECTED_LINE_LENGTH = 18;
+    private static final int BILLING_CYCLE_LENGTH = 2;
+    private static final int START_DATE_START_INDEX = 2;
+    private static final int START_DATE_END_INDEX = 10;
+    private static final int END_DATE_START_INDEX = 10;
+    private static final int END_DATE_END_INDEX = 18;
+    private static final Logger log = LoggerFactory.getLogger(
+            BarsController.class);
+
+    @Override
+    public List<Request> readFile() throws IOException, BarsException {
+        List<Request> requests = new ArrayList<>();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MMddyyyy");
+
+        try (BufferedReader br = new BufferedReader(new FileReader(getFile()))){
+            String line;
+            int lineNumber = 1;
+            while ((line = br.readLine()) != null) {
+                if (line.length() != EXPECTED_LINE_LENGTH) {
+                    throw new BarsException("Invalid line length at row "
+                            + lineNumber + ": " + line, HttpStatus.BAD_REQUEST);
+                }
+
+                // extract billing cycle from first 2 characters
+                int billingCycle;
+                try {
+                    billingCycle = Integer.parseInt(
+                            line.substring(0, BILLING_CYCLE_LENGTH ));
+                } catch (NumberFormatException e) {
+                    throw new BarsException(BarsException.INVALID_BILLING_CYCLE
+                            + lineNumber + ": " + line, HttpStatus.BAD_REQUEST);
+                }
+                if (billingCycle < MIN_BILLING_CYCLE ||
+                        billingCycle > MAX_BILLING_CYCLE) {
+                    throw new BarsException(
+                            BarsException.BILLING_CYCLE_NOT_ON_RANGE
+                                    + lineNumber, HttpStatus.BAD_REQUEST);
+                }
+
+                // extract start date from next 8 characters
+                LocalDate startDate;
+                try {
+                    startDate = LocalDate.parse(line.substring(
+                            START_DATE_START_INDEX,
+                            START_DATE_END_INDEX).trim(), formatter);
+
+                } catch (DateTimeParseException e) {
+                    log.error(BarsException.INVALID_START_DATE_FORMAT
+                            + lineNumber,e);
+                    throw new BarsException(
+                            BarsException.INVALID_START_DATE_FORMAT
+                                    + lineNumber, HttpStatus.BAD_REQUEST);
+                }
+
+                // extract end date from last 8 characters
+                LocalDate endDate;
+                try {
+                    endDate = LocalDate.parse(
+                            line.substring(END_DATE_START_INDEX,
+                                    END_DATE_END_INDEX).trim(), formatter);
+                } catch (DateTimeParseException e) {
+                    log.error(BarsException.INVALID_END_DATE_FORMAT
+                            + lineNumber,e);
+                    throw new BarsException(
+                            BarsException.INVALID_END_DATE_FORMAT
+                                    + lineNumber, HttpStatus.BAD_REQUEST);
+                }
+
+                // create Request object and add to list
+                Request request = new Request(billingCycle, startDate, endDate);
+                requests.add(request);
+
+                lineNumber++;
+            }
+        } catch (IOException e) {
+            log.error("Failed to read input file: " + e.getMessage(),e);
+            throw new IOException("Failed to read input file: "
+                    + e.getMessage());
+        }
+
+        return requests;
+    }
+
+}
